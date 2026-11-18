@@ -1,6 +1,9 @@
+import { motion } from "framer-motion";
 import {
   AlertTriangle,
   CalendarClock,
+  CheckCircle2,
+  HelpCircle,
   Info,
   Moon,
   Pill,
@@ -30,6 +33,9 @@ export default function MedicineCard({
   medicine,
   index,
   language,
+  photoUrl = null,
+  onPreviewPhoto,
+  isVerified = false,
   isSpeaking,
   speechSupported,
   onListen,
@@ -37,12 +43,23 @@ export default function MedicineCard({
 }) {
   const t = COPY[language];
 
+  const effectiveStatus =
+    isVerified || medicine.match_status === "match"
+      ? "match"
+      : medicine.match_status || "no_photo";
+
+  const isMatched = effectiveStatus === "match";
+  const isNoMatch = effectiveStatus === "no_match";
+  const isUnclear = effectiveStatus === "unclear";
+
   return (
     <article
       className={`rounded-3xl border bg-white p-5 shadow-sm transition-all sm:p-6 ${
-        medicine.low_confidence
-          ? "border-amber-300 ring-2 ring-amber-200/70"
-          : "border-teal-900/10 hover:border-teal-300"
+        isMatched
+          ? "border-emerald-400 bg-emerald-50/15 ring-2 ring-emerald-200/75"
+          : isNoMatch || medicine.low_confidence
+            ? "border-amber-300 ring-2 ring-amber-200/70"
+            : "border-teal-900/10 hover:border-teal-300"
       }`}
     >
       {/* Low Confidence Warning Banner */}
@@ -56,22 +73,95 @@ export default function MedicineCard({
       {/* Card Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3.5">
-          <span
-            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-lg font-extrabold ${
-              medicine.low_confidence
-                ? "bg-amber-100 text-amber-800"
-                : "bg-teal-100/80 text-teal-800"
-            }`}
-          >
-            {index + 1}
-          </span>
+          {/* Matched Medicine Strip Photo Thumbnail OR Index Badge */}
+          {photoUrl ? (
+            <button
+              type="button"
+              onClick={() =>
+                onPreviewPhoto?.({
+                  url: photoUrl,
+                  title: medicine.name,
+                  subtitle: medicine.match_note || medicine.purpose,
+                })
+              }
+              title={t.tapToEnlarge}
+              className="relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl border-2 border-emerald-400 bg-slate-100 shadow-sm transition hover:scale-105 focus:outline-none"
+            >
+              <img
+                src={photoUrl}
+                alt={medicine.name}
+                className="h-full w-full object-cover"
+              />
+              {medicine.photo_index && (
+                <span className="absolute bottom-1 right-1 rounded bg-slate-950/75 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+                  #{medicine.photo_index}
+                </span>
+              )}
+            </button>
+          ) : (
+            <span
+              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-lg font-extrabold ${
+                isMatched
+                  ? "bg-emerald-600 text-white shadow-sm shadow-emerald-600/20"
+                  : medicine.low_confidence
+                    ? "bg-amber-100 text-amber-800"
+                    : "bg-teal-100/80 text-teal-800"
+              }`}
+            >
+              {isMatched ? <CheckCircle2 className="h-6 w-6" /> : index + 1}
+            </span>
+          )}
+
           <div>
-            <h3 className="text-xl font-extrabold leading-tight text-teal-950 sm:text-2xl">
-              {medicine.name}
-            </h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-xl font-extrabold leading-tight text-teal-950 sm:text-2xl">
+                {medicine.name}
+              </h3>
+
+              {isMatched && (
+                <motion.span
+                  initial={{ scale: 0.7, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: "spring", stiffness: 420, damping: 22 }}
+                  className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-extrabold text-emerald-800 ring-1 ring-emerald-300"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                  {medicine.match_status === "match" ? t.matchStatusMatch : t.verifiedBadge}
+                </motion.span>
+              )}
+
+              {isNoMatch && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-extrabold text-amber-900 ring-1 ring-amber-300">
+                  <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                  {t.matchStatusNoMatch}
+                </span>
+              )}
+
+              {isUnclear && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-3 py-1 text-xs font-extrabold text-slate-800 ring-1 ring-slate-300">
+                  <HelpCircle className="h-3.5 w-3.5 text-slate-600" />
+                  {t.matchStatusUnclear}
+                </span>
+              )}
+            </div>
+
             <p className="mt-1 text-base font-medium text-teal-800/90">
               {medicine.purpose}
             </p>
+
+            {medicine.match_note && effectiveStatus !== "no_photo" && (
+              <p
+                className={`mt-1.5 text-sm font-semibold ${
+                  isMatched
+                    ? "text-emerald-800"
+                    : isNoMatch
+                      ? "text-amber-800"
+                      : "text-slate-700"
+                }`}
+              >
+                {medicine.match_note}
+              </p>
+            )}
           </div>
         </div>
 

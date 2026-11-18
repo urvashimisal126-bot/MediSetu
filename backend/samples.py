@@ -1,10 +1,18 @@
 import io
 from PIL import Image, ImageDraw, ImageFont
 
-from schemas import AnalysisResponse, LanguageCode, MedicineItem, SamplePrescriptionMeta
+from schemas import (
+    AnalysisResponse,
+    LanguageCode,
+    MedicineItem,
+    SamplePrescriptionMeta,
+    UnmatchedPhoto,
+)
 
 DISCLAIMER_EN = "This is not medical advice. Please verify every medicine and dose with your doctor or pharmacist."
 DISCLAIMER_HI = "यह चिकित्सीय सलाह नहीं है। कृपया हर दवा और उसकी खुराक की पुष्टि अपने डॉक्टर या फार्मासिस्ट से करें।"
+PHARMACIST_NOTE_EN = "Please confirm with your pharmacist."
+PHARMACIST_NOTE_HI = "कृपया अपने फार्मासिस्ट से पुष्टि करें।"
 
 SAMPLES_DATA: dict[str, dict] = {
     "fever-care": {
@@ -312,8 +320,10 @@ def get_sample_analysis(sample_id: str, language: LanguageCode) -> AnalysisRespo
     lang_data = entry[language]
     return AnalysisResponse(
         medicines=lang_data["medicines"],
+        unmatched_photos=[],
         summary=lang_data["summary"],
         disclaimer=lang_data["disclaimer"],
+        pharmacist_note=PHARMACIST_NOTE_HI if language == "hi" else PHARMACIST_NOTE_EN,
         questions_for_doctor=lang_data["questions_for_doctor"],
         language=language,
         source="sample",
@@ -321,10 +331,70 @@ def get_sample_analysis(sample_id: str, language: LanguageCode) -> AnalysisRespo
     )
 
 
-def get_mock_analysis(language: LanguageCode) -> AnalysisResponse:
+def get_mock_analysis(language: LanguageCode, num_medicine_photos: int = 0) -> AnalysisResponse:
     base = get_sample_analysis("fever-care", language)
     assert base is not None
-    return base.model_copy(update={"source": "mock", "processing_ms": 340})
+
+    if num_medicine_photos <= 0:
+        return base.model_copy(update={"source": "mock", "processing_ms": 340})
+
+    meds: list[MedicineItem] = []
+    for idx, med in enumerate(base.medicines):
+        if idx == 0 and num_medicine_photos >= 1:
+            note = (
+                "फोटो 1 पर लिखा नाम और 500mg पावर आपके पर्चे से मेल खाता है।"
+                if language == "hi"
+                else "Photo 1 matches Paracetamol 500mg on your prescription."
+            )
+            meds.append(
+                med.model_copy(
+                    update={"photo_index": 1, "match_status": "match", "match_note": note}
+                )
+            )
+        elif idx == 1 and num_medicine_photos >= 2:
+            note = (
+                "फोटो 2 पर लिखा नाम और 500mg पावर आपके पर्चे से मेल खाता है।"
+                if language == "hi"
+                else "Photo 2 matches Azithromycin 500mg on your prescription."
+            )
+            meds.append(
+                med.model_copy(
+                    update={"photo_index": 2, "match_status": "match", "match_note": note}
+                )
+            )
+        else:
+            meds.append(
+                med.model_copy(
+                    update={"photo_index": None, "match_status": "no_photo", "match_note": ""}
+                )
+            )
+
+    unmatched: list[UnmatchedPhoto] = []
+    if num_medicine_photos >= 3:
+        for extra_idx in range(3, num_medicine_photos + 1):
+            label = "Ibuprofen 400mg" if extra_idx == 3 else f"Vitamin C 500mg (Photo {extra_idx})"
+            note = (
+                "यह दवा आपके पर्चे में नहीं लिखी है। कृपया अपने फार्मासिस्ट से पूछें।"
+                if language == "hi"
+                else "This medicine does not match anything on your prescription. Please ask your pharmacist."
+            )
+            unmatched.append(
+                UnmatchedPhoto(
+                    photo_index=extra_idx,
+                    detected_label=label,
+                    note=note,
+                )
+            )
+
+    return base.model_copy(
+        update={
+            "medicines": meds,
+            "unmatched_photos": unmatched,
+            "pharmacist_note": PHARMACIST_NOTE_HI if language == "hi" else PHARMACIST_NOTE_EN,
+            "source": "mock",
+            "processing_ms": 380,
+        }
+    )
 
 
 def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:

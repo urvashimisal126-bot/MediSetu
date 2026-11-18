@@ -33,23 +33,39 @@ export function buildFullSpeechText(result, language) {
 
   result.medicines.forEach((med, idx) => {
     const times = (med.timing || []).map((t) => timingNames[t] || t).join(", ");
+    const matchSpoken = med.match_note ? ` ${med.match_note}` : "";
     if (language === "hi") {
       const warning = med.low_confidence
         ? " ध्यान दें: इस दवा की लिखावट अस्पष्ट है, कृपया डॉक्टर से पुष्टि करें।"
         : "";
       parts.push(
-        `दवा नंबर ${idx + 1}: ${med.name}. ${med.purpose}. खुराक: ${med.dose}. समय: ${times || "डॉक्टर के अनुसार"}. ${med.instructions}. अवधि: ${med.duration}.${warning}`,
+        `दवा नंबर ${idx + 1}: ${med.name}. ${med.purpose}. खुराक: ${med.dose}. समय: ${times || "डॉक्टर के अनुसार"}. ${med.instructions}. अवधि: ${med.duration}.${matchSpoken}${warning}`,
       );
     } else {
       const warning = med.low_confidence
         ? " Caution: the handwriting for this medicine was unclear, please verify with your doctor."
         : "";
       parts.push(
-        `Medicine ${idx + 1}: ${med.name}. ${med.purpose}. Dose: ${med.dose}. Take in the ${times || "as advised"}. ${med.instructions}. Duration: ${med.duration}.${warning}`,
+        `Medicine ${idx + 1}: ${med.name}. ${med.purpose}. Dose: ${med.dose}. Take in the ${times || "as advised"}. ${med.instructions}. Duration: ${med.duration}.${matchSpoken}${warning}`,
       );
     }
   });
 
+  if (result.unmatched_photos && result.unmatched_photos.length > 0) {
+    result.unmatched_photos.forEach((u) => {
+      if (language === "hi") {
+        parts.push(
+          `चेतावनी: फोटो नंबर ${u.photo_index} (${u.detected_label || "अज्ञात दवा"}) आपके पर्चे से मेल नहीं खाती। ${u.note || ""}`,
+        );
+      } else {
+        parts.push(
+          `Warning: Photo ${u.photo_index} (${u.detected_label || "unknown medicine"}) does not match your prescription. ${u.note || ""}`,
+        );
+      }
+    });
+  }
+
+  if (result.pharmacist_note) parts.push(result.pharmacist_note);
   if (result.disclaimer) parts.push(result.disclaimer);
   return parts.join(" ");
 }
@@ -60,11 +76,12 @@ export function buildMedicineSpeechText(med, language) {
       ? { morning: "सुबह", afternoon: "दोपहर", night: "रात" }
       : { morning: "morning", afternoon: "afternoon", night: "night" };
   const times = (med.timing || []).map((t) => timingNames[t] || t).join(", ");
+  const matchSpoken = med.match_note ? ` ${med.match_note}` : "";
 
   if (language === "hi") {
-    return `${med.name}. ${med.purpose}. खुराक: ${med.dose}. समय: ${times || "डॉक्टर के अनुसार"}. ${med.instructions}. अवधि: ${med.duration}.`;
+    return `${med.name}. ${med.purpose}. खुराक: ${med.dose}. समय: ${times || "डॉक्टर के अनुसार"}. ${med.instructions}. अवधि: ${med.duration}.${matchSpoken}`;
   }
-  return `${med.name}. ${med.purpose}. Dose: ${med.dose}. When to take: ${times || "as advised"}. ${med.instructions}. For ${med.duration}.`;
+  return `${med.name}. ${med.purpose}. Dose: ${med.dose}. When to take: ${times || "as advised"}. ${med.instructions}. For ${med.duration}.${matchSpoken}`;
 }
 
 export function useSpeech(language) {

@@ -3,9 +3,18 @@ import { motion } from "framer-motion";
 import { CheckCircle2, Loader2, X } from "lucide-react";
 import { COPY } from "../utils/i18n";
 
-export default function ProcessingView({ language, previewUrl, compressionStats, onCancel }) {
+export default function ProcessingView({
+  language,
+  previewUrl,
+  medicinePhotos = [],
+  compressionStats,
+  onCancel,
+}) {
   const t = COPY[language];
   const [stepIdx, setStepIdx] = useState(0);
+  const hasMedPhotos = medicinePhotos.length > 0;
+  const steps = hasMedPhotos ? t.processingWithMedsSteps : t.processingSteps;
+  const title = hasMedPhotos ? t.processingWithMedsTitle : t.processingTitle;
 
   useEffect(() => {
     const timers = [
@@ -34,11 +43,32 @@ export default function ProcessingView({ language, previewUrl, compressionStats,
           </div>
         )}
 
+        {/* Medicine strip thumbnails when present */}
+        {hasMedPhotos && (
+          <div className="mb-5 flex flex-wrap items-center justify-center gap-2">
+            {medicinePhotos.map((photo, idx) => (
+              <div
+                key={photo.id}
+                className="relative h-12 w-12 overflow-hidden rounded-xl border border-teal-200 bg-white shadow-xs"
+              >
+                <img
+                  src={photo.objectUrl}
+                  alt={`Medicine ${idx + 1}`}
+                  className="h-full w-full object-cover"
+                />
+                <span className="absolute bottom-0.5 right-0.5 rounded bg-teal-900/80 px-1 text-[10px] font-bold text-white">
+                  {idx + 1}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-teal-50 text-teal-700">
           <Loader2 className="h-7 w-7 animate-spin" />
         </div>
 
-        <h2 className="mt-4 text-2xl font-extrabold text-teal-950">{t.processingTitle}</h2>
+        <h2 className="mt-4 text-2xl font-extrabold text-teal-950">{title}</h2>
 
         {compressionStats && (
           <p className="mt-1.5 text-xs font-semibold text-teal-700">
@@ -48,7 +78,7 @@ export default function ProcessingView({ language, previewUrl, compressionStats,
 
         {/* Step Checklist */}
         <ul className="mx-auto mt-6 max-w-sm space-y-2.5 text-left">
-          {t.processingSteps.map((label, idx) => {
+          {steps.map((label, idx) => {
             const done = idx < stepIdx;
             const active = idx === stepIdx;
             return (

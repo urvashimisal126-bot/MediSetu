@@ -12,7 +12,9 @@ import {
   HelpCircle,
   Loader2,
   Pause,
+  PillBottle,
   Play,
+  ScanLine,
   ShieldAlert,
   Sparkles,
   Square,
@@ -27,21 +29,77 @@ import {
 } from "../hooks/useSpeech";
 import TimelineSection from "./TimelineSection";
 import MedicineCard from "./MedicineCard";
+import MedicineCheckModal from "./MedicineCheckModal";
+
+function findMatchingMedicineIndex(medicines, matchedName) {
+  if (!matchedName || !medicines || medicines.length === 0) return -1;
+  const target = matchedName.trim().toLowerCase();
+
+  const exactIdx = medicines.findIndex((m) => (m.name || "").trim().toLowerCase() === target);
+  if (exactIdx !== -1) return exactIdx;
+
+  const subIdx = medicines.findIndex((m) => {
+    const n = (m.name || "").trim().toLowerCase();
+    return n && (n.includes(target) || target.includes(n));
+  });
+  if (subIdx !== -1) return subIdx;
+
+  const tokens = target.split(/[\s(),./-]+/).filter((w) => w.length >= 3);
+  if (tokens.length === 0) return -1;
+
+  let bestIdx = -1;
+  let bestScore = 0;
+  medicines.forEach((m, idx) => {
+    const n = (m.name || "").toLowerCase();
+    const score = tokens.reduce((acc, tok) => acc + (n.includes(tok) ? 1 : 0), 0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = idx;
+    }
+  });
+  return bestScore > 0 ? bestIdx : -1;
+}
 
 export default function ResultView({
   result,
   language,
   previewUrl,
+  medicinePhotos = [],
   isSwitchingLanguage,
+  translationError,
+  onRetryTranslation,
   onReset,
 }) {
   const t = COPY[language];
   const speech = useSpeech(language);
-  const [showPhotoModal, setShowPhotoModal] = useState(false);
+  const [lightboxPhoto, setLightboxPhoto] = useState(null); // { url, title, subtitle }
+  const [showCheckModal, setShowCheckModal] = useState(false);
+  const [extraVerifiedIndices, setExtraVerifiedIndices] = useState([]);
   const [checkedQuestions, setCheckedQuestions] = useState({});
   const [copied, setCopied] = useState(false);
 
-  const hasLowConfidence = (result.medicines || []).some((m) => m.low_confidence);
+  const medicines = result.medicines || [];
+  const unmatchedPhotos = result.unmatched_photos || [];
+
+  // Combine upfront matched medicines (from /analyze) + any extra strips scanned via Match My Medicine modal (/verify)
+  const verifiedIndices = Array.from(
+    new Set([
+      ...medicines
+        .map((m, idx) => (m.match_status === "match" ? idx : -1))
+        .filter((idx) => idx !== -1),
+      ...extraVerifiedIndices,
+    ]),
+  );
+
+  const handleVerifySuccess = (verifyData) => {
+    if (verifyData?.status !== "match" || !verifyData?.matched_medicine) return;
+    const matchedIdx = findMatchingMedicineIndex(medicines, verifyData.matched_medicine);
+    if (matchedIdx !== -1) {
+      setExtraVerifiedIndices((prev) => (prev.includes(matchedIdx) ? prev : [...prev, matchedIdx]));
+    }
+  };
+
+  const hasLowConfidence = medicines.some((m) => m.low_confidence);
   const isSpeakingAll = speech.status === "speaking" && speech.activeId === "all";
   const isPausedAll = speech.status === "paused" && speech.activeId === "all";
 
@@ -126,6 +184,40 @@ export default function ResultView({
         </div>
       </div>
 
+      {/* Translating In-Progress Banner */}
+      {isSwitchingLanguage && (
+        <div
+          className="flex items-center gap-3 rounded-2xl border border-teal-300 bg-teal-50 px-5 py-4 text-teal-950 shadow-xs"
+          role="status"
+        >
+          <Loader2 className="h-5 w-5 shrink-0 animate-spin text-teal-700" />
+          <p className="text-sm font-bold sm:text-base">{t.translatingBanner}</p>
+        </div>
+      )}
+
+      {/* Translation Error Banner with Retry */}
+      {translationError && !isSwitchingLanguage && (
+        <div
+          className="flex flex-col gap-3 rounded-2xl border-2 border-rose-200 bg-rose-50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+          role="alert"
+        >
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" />
+            <div>
+              <p className="text-sm font-extrabold text-rose-900">{t.translationFailedTitle}</p>
+              <p className="mt-0.5 text-xs text-rose-800 sm:text-sm">{translationError.message}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onRetryTranslation}
+            className="shrink-0 rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white shadow-xs transition hover:bg-teal-800"
+          >
+            {t.retryTranslation}
+          </button>
+        </div>
+      )}
+
       {/* Prominent Voice Readout Bar */}
       <section className="rounded-3xl bg-gradient-to-r from-teal-700 via-teal-700 to-emerald-700 p-5 text-white shadow-xl shadow-teal-900/15 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -133,9 +225,18 @@ export default function ResultView({
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/15 backdrop-blur-xs">
               {isSpeakingAll ? (
                 <div className="flex h-6 items-end gap-1">
-                  <span className="eq-bar w-1.5 rounded-full bg-white" style={{ height: "100%", animationDelay: "0ms" }} />
-                  <span className="eq-bar w-1.5 rounded-full bg-white" style={{ height: "75%", animationDelay: "180ms" }} />
-                  <span className="eq-bar w-1.5 rounded-full bg-white" style={{ height: "90%", animationDelay: "340ms" }} />
+                  <span
+                    className="eq-bar w-1.5 rounded-full bg-white"
+                    style={{ height: "100%", animationDelay: "0ms" }}
+                  />
+                  <span
+                    className="eq-bar w-1.5 rounded-full bg-white"
+                    style={{ height: "75%", animationDelay: "180ms" }}
+                  />
+                  <span
+                    className="eq-bar w-1.5 rounded-full bg-white"
+                    style={{ height: "90%", animationDelay: "340ms" }}
+                  />
                 </div>
               ) : (
                 <Volume2 className="h-7 w-7 text-white" />
@@ -216,6 +317,75 @@ export default function ResultView({
         </div>
       )}
 
+      {/* Unmatched Medicine Photos Amber Card */}
+      {unmatchedPhotos.length > 0 && (
+        <section
+          className="rounded-3xl border-2 border-amber-300 bg-amber-50/95 p-5 shadow-sm sm:p-6"
+          role="alert"
+        >
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-amber-600" />
+            <div>
+              <h2 className="text-lg font-extrabold text-amber-950 sm:text-xl">
+                {t.unmatchedTitle}
+              </h2>
+              <p className="mt-0.5 text-sm font-medium text-amber-900/85">
+                {t.unmatchedSubtitle}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {unmatchedPhotos.map((item, idx) => {
+              const photoObj =
+                item.photo_index && medicinePhotos[item.photo_index - 1]
+                  ? medicinePhotos[item.photo_index - 1]
+                  : null;
+              return (
+                <div
+                  key={`unmatched-${item.photo_index}-${idx}`}
+                  className="flex items-start gap-3.5 rounded-2xl border border-amber-200 bg-white p-3.5 shadow-xs"
+                >
+                  {photoObj && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLightboxPhoto({
+                          url: photoObj.objectUrl,
+                          title: item.detected_label || t.photoNumber(item.photo_index),
+                          subtitle: item.note,
+                        })
+                      }
+                      className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border-2 border-amber-300 bg-slate-100 transition hover:scale-105"
+                    >
+                      <img
+                        src={photoObj.objectUrl}
+                        alt={item.detected_label || `Photo ${item.photo_index}`}
+                        className="h-full w-full object-cover"
+                      />
+                      <span className="absolute bottom-1 right-1 rounded bg-amber-900/85 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+                        #{item.photo_index}
+                      </span>
+                    </button>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <span className="inline-block rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-extrabold text-amber-900">
+                      {t.photoNumber(item.photo_index)}
+                    </span>
+                    {item.detected_label && (
+                      <p className="mt-1 text-base font-extrabold text-slate-900">
+                        {item.detected_label}
+                      </p>
+                    )}
+                    <p className="mt-1 text-sm leading-snug text-amber-950/85">{item.note}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Plain-Language Summary + Original Prescription Thumbnail */}
       <section className="grid gap-5 lg:grid-cols-3">
         <div className="rounded-3xl border border-teal-900/10 bg-white p-6 shadow-sm lg:col-span-2">
@@ -238,7 +408,13 @@ export default function ResultView({
             </div>
             <button
               type="button"
-              onClick={() => setShowPhotoModal(true)}
+              onClick={() =>
+                setLightboxPhoto({
+                  url: previewUrl,
+                  title: t.step1Label,
+                  subtitle: "",
+                })
+              }
               className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-teal-50 px-4 py-2.5 text-sm font-bold text-teal-900 transition hover:bg-teal-100"
             >
               <Eye className="h-4 w-4" />
@@ -248,8 +424,13 @@ export default function ResultView({
         )}
       </section>
 
-      {/* Daily Schedule Timeline */}
-      <TimelineSection medicines={result.medicines || []} language={language} />
+      {/* Daily Schedule Timeline (with Medicine Photo Thumbnails + Match Badges) */}
+      <TimelineSection
+        medicines={medicines}
+        language={language}
+        medicinePhotos={medicinePhotos}
+        onPreviewPhoto={setLightboxPhoto}
+      />
 
       {/* Medicine Cards */}
       <section className="space-y-4">
@@ -258,24 +439,117 @@ export default function ResultView({
             {t.medicinesTitle}
           </h2>
           <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-bold text-teal-900">
-            {t.medicinesCount((result.medicines || []).length)}
+            {t.medicinesCount(medicines.length)}
           </span>
         </div>
 
         <div className="space-y-4">
-          {(result.medicines || []).map((med, idx) => (
-            <MedicineCard
-              key={`${med.name}-${idx}`}
-              medicine={med}
-              index={idx}
-              language={language}
-              speechSupported={speech.supported}
-              isSpeaking={speech.status === "speaking" && speech.activeId === `med-${idx}`}
-              onListen={() => speech.speak(buildMedicineSpeechText(med, language), `med-${idx}`)}
-              onStop={speech.stop}
-            />
-          ))}
+          {medicines.map((med, idx) => {
+            const photoObj =
+              med.photo_index && medicinePhotos[med.photo_index - 1]
+                ? medicinePhotos[med.photo_index - 1]
+                : null;
+            return (
+              <MedicineCard
+                key={`${med.name}-${idx}`}
+                medicine={med}
+                index={idx}
+                language={language}
+                photoUrl={photoObj?.objectUrl || null}
+                onPreviewPhoto={setLightboxPhoto}
+                isVerified={verifiedIndices.includes(idx)}
+                speechSupported={speech.supported}
+                isSpeaking={speech.status === "speaking" && speech.activeId === `med-${idx}`}
+                onListen={() => speech.speak(buildMedicineSpeechText(med, language), `med-${idx}`)}
+                onStop={speech.stop}
+              />
+            );
+          })}
         </div>
+      </section>
+
+      {/* Match My Medicine On-the-Spot Scanner Card (powered by real Gemini AI /verify) */}
+      <section className="rounded-3xl border-2 border-teal-200/90 bg-gradient-to-br from-teal-50 via-white to-emerald-50/80 p-5 shadow-sm sm:p-7">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-4">
+            <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-teal-700 text-white shadow-md shadow-teal-700/20">
+              <PillBottle className="h-7 w-7" />
+            </span>
+            <div>
+              <h2 className="text-xl font-extrabold text-teal-950 sm:text-2xl">
+                {t.matchCardTitle}
+              </h2>
+              <p className="mt-1 text-sm font-medium text-teal-900/75 sm:text-base">
+                {t.matchCardSubtitle}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowCheckModal(true)}
+            className="inline-flex items-center justify-center gap-2.5 rounded-2xl bg-teal-700 px-6 py-4 text-base font-extrabold text-white shadow-lg shadow-teal-700/20 transition hover:bg-teal-800 active:scale-[0.99] sm:shrink-0"
+          >
+            <ScanLine className="h-5 w-5" />
+            <span>{t.checkMedButton}</span>
+          </button>
+        </div>
+
+        {/* Verification Checklist */}
+        {medicines.length > 0 && (
+          <div className="mt-5 rounded-2xl border border-teal-900/10 bg-white/85 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-teal-800">
+                {t.checkMedChecklistTitle}
+              </h3>
+              <span
+                className={`rounded-full px-3 py-0.5 text-xs font-bold ${
+                  verifiedIndices.length >= medicines.length
+                    ? "bg-emerald-100 text-emerald-800"
+                    : "bg-teal-100 text-teal-900"
+                }`}
+              >
+                {verifiedIndices.length >= medicines.length
+                  ? t.checkMedAllVerified
+                  : t.checkMedProgress(verifiedIndices.length, medicines.length)}
+              </span>
+            </div>
+
+            <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+              {medicines.map((med, idx) => {
+                const isVerified = verifiedIndices.includes(idx);
+                return (
+                  <li
+                    key={`check-${med.name}-${idx}`}
+                    className={`flex items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5 text-sm transition ${
+                      isVerified
+                        ? "border-emerald-200 bg-emerald-50/80 text-emerald-950"
+                        : "border-teal-900/8 bg-slate-50/70 text-teal-950"
+                    }`}
+                  >
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      {isVerified ? (
+                        <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
+                      ) : (
+                        <Circle className="h-5 w-5 shrink-0 text-teal-300" />
+                      )}
+                      <span className="truncate font-bold">{med.name}</span>
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                        isVerified
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-slate-200/70 text-slate-600"
+                      }`}
+                    >
+                      {isVerified ? t.verifiedBadge : t.checkMedPending}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
       </section>
 
       {/* Stretch Feature: Questions to Ask Your Doctor */}
@@ -334,47 +608,69 @@ export default function ResultView({
         </section>
       )}
 
-      {/* Always-Visible Safety Disclaimer */}
+      {/* Always-Visible Safety Disclaimer & Pharmacist Confirmation */}
       <footer className="rounded-3xl border border-teal-900/15 bg-teal-950 px-6 py-5 text-teal-50 shadow-sm">
         <div className="flex items-start gap-3.5">
           <ShieldAlert className="mt-0.5 h-6 w-6 shrink-0 text-teal-300" />
-          <div>
+          <div className="space-y-1.5">
             <h3 className="text-sm font-extrabold uppercase tracking-wider text-teal-300">
               {t.safetyHeading}
             </h3>
-            <p className="mt-1 text-base leading-relaxed text-white/95">
-              {result.disclaimer}
-            </p>
+            <p className="text-base leading-relaxed text-white/95">{result.disclaimer}</p>
+            {result.pharmacist_note && (
+              <p className="text-sm font-bold text-teal-200">{result.pharmacist_note}</p>
+            )}
           </div>
         </div>
       </footer>
 
-      {/* Fullscreen Prescription Preview Modal */}
-      {showPhotoModal && previewUrl && (
+      {/* Fullscreen Lightbox Preview Modal (for Prescription OR Medicine Strip Thumbnails) */}
+      {lightboxPhoto && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-xs"
-          onClick={() => setShowPhotoModal(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-xs"
+          onClick={() => setLightboxPhoto(null)}
         >
           <div
-            className="relative max-h-[90vh] w-full max-w-3xl overflow-auto rounded-3xl bg-white p-3 shadow-2xl"
+            className="relative max-h-[90vh] w-full max-w-3xl overflow-auto rounded-3xl bg-white p-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <button
-              type="button"
-              onClick={() => setShowPhotoModal(false)}
-              className="absolute right-5 top-5 flex h-10 w-10 items-center justify-center rounded-full bg-slate-900/80 text-white shadow-md transition hover:bg-slate-900"
-              aria-label={t.hidePrescription}
-            >
-              <X className="h-5 w-5" />
-            </button>
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                {lightboxPhoto.title && (
+                  <h3 className="text-lg font-extrabold text-teal-950">{lightboxPhoto.title}</h3>
+                )}
+                {lightboxPhoto.subtitle && (
+                  <p className="mt-0.5 text-sm text-teal-900/75">{lightboxPhoto.subtitle}</p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setLightboxPhoto(null)}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 transition hover:bg-slate-200"
+                aria-label={t.hidePrescription}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
             <img
-              src={previewUrl}
-              alt="Full prescription preview"
-              className="w-full rounded-2xl object-contain"
+              src={lightboxPhoto.url}
+              alt={lightboxPhoto.title || "Full photo preview"}
+              className="max-h-[74vh] w-full rounded-2xl bg-slate-50 object-contain"
             />
           </div>
         </div>
       )}
+
+      {/* Match My Medicine On-the-Spot Modal */}
+      <MedicineCheckModal
+        open={showCheckModal}
+        onClose={() => setShowCheckModal(false)}
+        medicines={medicines}
+        language={language}
+        verifiedIndices={verifiedIndices}
+        onVerifySuccess={handleVerifySuccess}
+        speech={speech}
+      />
     </motion.div>
   );
 }
